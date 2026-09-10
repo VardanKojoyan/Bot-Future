@@ -3,4 +3,3 @@ aiohttp==3.11.12
 matplotlib==3.10.1
 numpy==2.2.3
 requests==2.32.3
-cloudscraper==1.2.71
