@@ -55,7 +55,7 @@ def estimate_initial_params(x, y, num_harmonics=2):
         p0.extend([1.0, 1.0, 0.0])
     return p0
 
-def predict_future(db_name="data.db", num_harmonics=2, future_ratio=0.8):
+def generate_prediction_plot(db_name="data.db", output_img="prediction.png", num_harmonics=2, future_ratio=0.8):
     x_real, y_real = load_data_from_db(db_name)
     p0 = estimate_initial_params(x_real, y_real, num_harmonics=num_harmonics)
     
@@ -66,14 +66,12 @@ def predict_future(db_name="data.db", num_harmonics=2, future_ratio=0.8):
     x_full = np.linspace(x_min, x_max + future_len, 1000)
     y_pred_full = fourier_model(x_full, *popt)
     
-    # Գտնում ենք ապագա էքստրեմումները (միայն x > x_max հատվածում)
+    # Գտնում ենք ապագա էքստրեմումները
     future_mask = x_full > x_max
     x_fut = x_full[future_mask]
     y_fut = y_pred_full[future_mask]
     
-    # Մաքսիմումներ
     max_peaks, _ = find_peaks(y_fut, distance=10)
-    # Մինիմումներ (հակադարձ նշանով)
     min_peaks, _ = find_peaks(-y_fut, distance=10)
     
     extremas = []
@@ -81,26 +79,17 @@ def predict_future(db_name="data.db", num_harmonics=2, future_ratio=0.8):
         extremas.append({'type': 'MAX', 'x': x_fut[p], 'y': y_fut[p]})
     for p in min_peaks:
         extremas.append({'type': 'MIN', 'x': x_fut[p], 'y': y_fut[p]})
-        
-    # Սորտավորում ենք ըստ x-ի
     extremas.sort(key=lambda item: item['x'])
     
-    return x_real, y_real, x_full, y_pred_full, x_max, extremas
-
-def generate_prediction_plot(db_name="data.db", output_img="plot.png"):
-    x_real, y_real, x_full, y_pred_full, x_max, extremas = predict_future(db_name)
-    
+    # Գրաֆիկ
     plt.figure(figsize=(10, 5))
     plt.scatter(x_real, y_real, color='black', s=15, label='Իրական տվյալներ (Past)', zorder=5)
     
     past_mask = x_full <= x_max
-    future_mask = x_full >= x_max
-    
     plt.plot(x_full[past_mask], y_pred_full[past_mask], color='blue', label='Մոտարկում (Fit)')
     plt.plot(x_full[future_mask], y_pred_full[future_mask], color='red', linestyle='--', linewidth=2, label='Կանխատեսում (Future)')
     plt.axvline(x=x_max, color='gray', linestyle=':', label='Այսօր (Present)')
     
-    # Նշում ենք ապագա էքստրեմումները գրաֆիկի վրա
     for ext in extremas:
         color = 'green' if ext['type'] == 'MAX' else 'purple'
         marker = '^' if ext['type'] == 'MAX' else 'v'
@@ -120,10 +109,3 @@ def generate_prediction_plot(db_name="data.db", output_img="plot.png"):
     plt.close()
     
     return extremas, output_img
-
-if __name__ == "__main__":
-    exts, img = generate_prediction_plot()
-    print("--- Ապագա Էքստրեմումներ ---")
-    for e in exts:
-        print(f"{e['type']} -> x = {e['x']:.3f}, y = {e['y']:.3f}")
-    print(f"📊 Գրաֆիկը պահպանվեց որպես {img}")
