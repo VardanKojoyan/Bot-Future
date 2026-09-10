@@ -56,19 +56,23 @@ async def cmd_predict(message: types.Message):
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
-async def start_web_server():
+async def main():
+    # Ստեղծում ենք aiohttp app-ը
     app = web.Application()
     app.router.add_get('/', handle_ping)
     app.router.add_get('/health', handle_ping)
+    
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.getenv("PORT", 8080))
+    
+    port = int(os.getenv("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-
-async def main():
-    await start_web_server()
+    print(f"🌐 Fake Web Server started on port {port}")
+    
     print("🤖 Բոտը գործարկված է...")
+    # Ջնջում ենք հին webhook-ները, որպեսզի conflict չլինի
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
