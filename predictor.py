@@ -1,7 +1,6 @@
 import sqlite3
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 
 def load_data_from_db(db_name="data.db"):
@@ -18,91 +17,76 @@ def load_data_from_db(db_name="data.db"):
     y = np.array([r[1] for r in rows], dtype=float)
     return x, y
 
-def fourier_model(x, *params):
-    offset = params[0]
-    result = np.full_like(x, offset, dtype=float)
-    num_harmonics = (len(params) - 1) // 3
-    for i in range(num_harmonics):
-        A = params[1 + 3 * i]
-        omega = params[2 + 3 * i]
-        phi = params[3 + 3 * i]
-        result += A * np.sin(omega * x + phi)
-    return result
-
-def estimate_initial_params(x, y, num_harmonics=2):
-    N = len(x)
-    dx = np.mean(np.diff(x))
-    offset_guess = np.mean(y)
-    y_centered = y - offset_guess
-    
-    fft_vals = np.fft.rfft(y_centered)
-    fft_freqs = np.fft.rfftfreq(N, d=dx)
-    amps = np.abs(fft_vals) / N * 2
-    
-    peaks, _ = find_peaks(amps)
-    if len(peaks) == 0:
-        sorted_indices = np.argsort(amps)[::-1][:num_harmonics]
-    else:
-        sorted_indices = peaks[np.argsort(amps[peaks])[::-1][:num_harmonics]]
-        
-    p0 = [offset_guess]
-    for idx in sorted_indices:
-        amp_guess = amps[idx] if amps[idx] > 0 else 1.0
-        omega_guess = 2 * np.pi * fft_freqs[idx]
-        p0.extend([amp_guess, omega_guess, 0.0])
-        
-    while len(p0) < 1 + 3 * num_harmonics:
-        p0.extend([1.0, 1.0, 0.0])
-    return p0
-
-def generate_prediction_plot(db_name="data.db", output_img="prediction.png", num_harmonics=2, future_ratio=0.8):
+def generate_prediction_plot(db_name="data.db", output_img="prediction.png", future_hours=48, top_harmonics=5):
     x_real, y_real = load_data_from_db(db_name)
-    p0 = estimate_initial_params(x_real, y_real, num_harmonics=num_harmonics)
+    N = len(x_real)
     
-    popt, _ = curve_fit(fourier_model, x_real, y_real, p0=p0, maxfev=10000)
+    # 1. Գնային Թրենդի առանձնացում (1-ին կամ 2-րդ աստիճանի պոլինոմ)
+    trend_poly = np.polyfit(x_real, y_real, deg=1)
+    trend_past = np.polyval(trend_poly, x_real)
+    detrended = y_real - trend_past  # Ալիքային տատանումները առանց թրենդի
     
-    x_min, x_max = x_real.min(), x_real.max()
-    future_len = (x_max - x_min) * future_ratio
-    x_full = np.linspace(x_min, x_max + future_len, 1000)
-    y_pred_full = fourier_model(x_full, *popt)
+    # 2. Fast Fourier Transform (FFT) detrended տվյալների վրա
+    fft_vals = np.fft.rfft(detrended)
+    fft_freqs = np.fft.rfftfreq(N)
     
-    # Գտնում ենք ապագա էքստրեմումները
-    future_mask = x_full > x_max
+    # Վերցնում ենք ամենաբարձր ամպլիտուդով top_harmonics հաճախությունները
+    amps = np.abs(fft_vals)
+    top_indices = np.argsort(amps)[::-1][:top_harmonics]
+    
+    # 3. Ապագա ժամերի տիրույթ (օրինակ՝ առաջիկա 48 ժամը)
+    last_x = x_real[-1]
+    x_future = np.arange(last_x + 1, last_x + 1 + future_hours)
+    x_full = np.concatenate([x_real, x_future])
+    
+    # 4. Ֆուրյեի վերականգնում (Reconstruction & Extrapolation)
+    detrended_full = np.zeros(len(x_full))
+    for idx in top_indices:
+        amp = np.abs(fft_vals[idx]) / (N / 2)
+        phase = np.angle(fft_vals[idx])
+        freq = fft_freqs[idx]
+        detrended_full += amp * np.cos(2 * np.pi * freq * x_full + phase)
+        
+    trend_full = np.polyval(trend_poly, x_full)
+    y_pred_full = trend_full + detrended_full
+    
+    # 5. Գտնում ենք ապագայի (Future) Էքստրեմումները
+    future_mask = x_full > last_x
     x_fut = x_full[future_mask]
     y_fut = y_pred_full[future_mask]
     
-    max_peaks, _ = find_peaks(y_fut, distance=10)
-    min_peaks, _ = find_peaks(-y_fut, distance=10)
+    max_peaks, _ = find_peaks(y_fut, distance=3)
+    min_peaks, _ = find_peaks(-y_fut, distance=3)
     
     extremas = []
     for p in max_peaks:
-        extremas.append({'type': 'MAX', 'x': x_fut[p], 'y': y_fut[p]})
+        hours_ahead = int(x_fut[p] - last_x)
+        extremas.append({'type': 'MAX', 'x': x_fut[p], 'y': y_fut[p], 'hours_ahead': hours_ahead})
     for p in min_peaks:
-        extremas.append({'type': 'MIN', 'x': x_fut[p], 'y': y_fut[p]})
+        hours_ahead = int(x_fut[p] - last_x)
+        extremas.append({'type': 'MIN', 'x': x_fut[p], 'y': y_fut[p], 'hours_ahead': hours_ahead})
     extremas.sort(key=lambda item: item['x'])
     
-    # Գրաֆիկ
-    plt.figure(figsize=(10, 5))
-    plt.scatter(x_real, y_real, color='black', s=15, label='Իրական տվյալներ (Past)', zorder=5)
-    
-    past_mask = x_full <= x_max
-    plt.plot(x_full[past_mask], y_pred_full[past_mask], color='blue', label='Մոտարկում (Fit)')
-    plt.plot(x_full[future_mask], y_pred_full[future_mask], color='red', linestyle='--', linewidth=2, label='Կանխատեսում (Future)')
-    plt.axvline(x=x_max, color='gray', linestyle=':', label='Այսօր (Present)')
+    # 6. Գրաֆիկի կառուցում
+    plt.figure(figsize=(11, 5))
+    plt.plot(x_real, y_real, color='black', label='BTC/USDT Իրական (Binance 1h)', linewidth=1.5)
+    plt.plot(x_full[:N], y_pred_full[:N], color='blue', alpha=0.7, linestyle='--', label='Ֆուրյե+Թրենդ մոտարկում')
+    plt.plot(x_full[N-1:], y_pred_full[N-1:], color='red', linewidth=2, label=f'Կանխատեսում (+{future_hours} ժամ)')
+    plt.axvline(x=last_x, color='gray', linestyle=':', label='Այսօր/Ներկա պահ')
     
     for ext in extremas:
         color = 'green' if ext['type'] == 'MAX' else 'purple'
         marker = '^' if ext['type'] == 'MAX' else 'v'
         plt.plot(ext['x'], ext['y'], marker=marker, color=color, markersize=8)
-        plt.annotate(f"{ext['type']}\n({ext['x']:.2f}, {ext['y']:.2f})", 
+        plt.annotate(f"{ext['type']}\n+{ext['hours_ahead']}h\n${ext['y']:.0f}", 
                      (ext['x'], ext['y']), 
                      textcoords="offset points", 
-                     xytext=(0, 10 if ext['type']=='MAX' else -20), 
-                     ha='center', fontsize=8, color=color)
+                     xytext=(0, 10 if ext['type']=='MAX' else -25), 
+                     ha='center', fontsize=7, color=color)
         
-    plt.title("Ֆունկցիայի Կանխատեսում և Ապագա Էքստրեմումներ")
-    plt.xlabel("X")
-    plt.ylabel("Y")
+    plt.title(f"Binance BTC/USDT Ժամային Կանխատեսում (+{future_hours} ժամ)")
+    plt.xlabel("Ժամեր (Hours)")
+    plt.ylabel("Գին ($ USDT)")
     plt.legend(loc='best')
     plt.grid(True, alpha=0.3)
     plt.savefig(output_img, dpi=150, bbox_inches='tight')
