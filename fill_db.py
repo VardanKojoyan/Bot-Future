@@ -2,35 +2,34 @@ import sqlite3
 import requests
 
 def update_binance_data(symbol="BTCUSDT", interval="1h", limit=200, db_name="data.db"):
-    # Օգտագործում ենք api1, api2 կամ api3 (որոնք չունեն 451 geo-block սահմանափակում)
-    endpoints = [
-        f"https://api1.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
-        f"https://api2.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
-        f"https://api3.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
-        f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    ]
+    # Bybit API endpoint (արգելափակված չէ Render-ում)
+    url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={symbol}&interval=60&limit={limit}"
     
-    response = None
-    for url in endpoints:
-        try:
-            res = requests.get(url, timeout=5)
-            if res.status_code == 200:
-                response = res
-                break
-        except Exception:
-            continue
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            raise Exception(f"API Error status: {response.status_code}")
             
-    if response is None or response.status_code != 200:
-        status = response.status_code if response else "No Connection"
-        raise Exception(f"Binance API Error: {status}")
+        data = response.json()
+        if data.get('retCode') != 0:
+            raise Exception(f"Bybit Error: {data.get('retMsg')}")
+            
+        kline_list = data['result']['list']
+        # Bybit-ը տվյալները տալիս է հակառակ դասավորությամբ (նորից հին), ուստի շրջում ենք
+        kline_list.reverse()
         
-    data = response.json()
+    except Exception as e:
+        raise Exception(f"Data Fetch Error: {str(e)}")
     
     prices = []
     times = []
     
-    for idx, item in enumerate(data):
-        close_price = float(item[4])
+    for idx, item in enumerate(kline_list):
+        close_price = float(item[4]) # 4-րդ ինդեքսը Close price-ն է
         prices.append(close_price)
         times.append(idx)
         
@@ -50,7 +49,7 @@ def update_binance_data(symbol="BTCUSDT", interval="1h", limit=200, db_name="dat
     
     conn.commit()
     conn.close()
-    print(f"✅ Binance {symbol} {interval}-ից {len(prices)} մոմ գրանցվեց {db_name}-ում։")
+    print(f"✅ Bybit-ից {symbol} {len(prices)} մոմ հաջողությամբ գրանցվեց {db_name}-ում։")
 
 if __name__ == "__main__":
     update_binance_data()
