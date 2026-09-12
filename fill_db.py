@@ -4,7 +4,7 @@ import requests
 def update_binance_data(symbol="BTCUSDT", interval="1h", limit=200, db_name="data.db"):
     prices = []
     
-    # Direct CoinGecko API integration (Render-ում չի արգելափակվում 403/451)
+    # CoinGecko-ի բաց API (արգելափակված չէ Render-ի IP-ների համար)
     url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=8"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -17,7 +17,7 @@ def update_binance_data(symbol="BTCUSDT", interval="1h", limit=200, db_name="dat
             data = response.json()
             raw_prices = data.get('prices', [])[-limit:]
             for item in raw_prices:
-                prices.append(float(item[1])) # Close price / Current price point
+                prices.append(float(item[1]))
         else:
             raise Exception(f"API HTTP Error Status: {response.status_code}")
     except Exception as e:
